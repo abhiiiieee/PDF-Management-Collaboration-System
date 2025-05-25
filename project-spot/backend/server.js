@@ -22,16 +22,11 @@ const commentRoutes = require('./routes/commentRoutes');
 const app = express();
 
 // Middleware
+app.use(express.static(path.join(__dirname, '../frontend/build')));
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-
-app.use(express.static(path.join(__dirname, '../frontend/build')));
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
-});
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -60,6 +55,10 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/pdf-colla
   .catch(err => {
     console.error('MongoDB connection error:', err);
     process.exit(1);
+  });
+
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
   });
 
 // Handle unhandled promise rejections

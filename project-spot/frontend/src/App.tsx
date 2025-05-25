@@ -83,13 +83,13 @@ const AppContent: React.FC = () => {
             </ProtectedRoute>
           } />
           
-          <Route path="/pdf_viewer/:id" element={
+          <Route path="/pdf/:id" element={
             <ProtectedRoute>
               <PdfViewer />
             </ProtectedRoute>
           } />
           
-          <Route path="/shared_pdf_viewer/:shareToken" element={<PdfViewer isShared />} />
+          <Route path="/shared_pdf/:shareToken" element={<PdfViewer isShared />} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -30,7 +30,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   }
   
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login_user" replace />;
   }
   
   return <>{children}</>;
@@ -56,7 +56,7 @@ const NavBar: React.FC = () => {
             </Button>
           </>
         ) : (
-          <Button color="inherit" href="/login">
+          <Button color="inherit" href="/login_user">
             Login
           </Button>
         )}
@@ -72,9 +72,9 @@ const AppContent: React.FC = () => {
       <NavBar />
       <Container sx={{ flexGrow: 1, py: 3 }}>
         <Routes>
-          <Route path="/login" element={<AuthForms initialMode="login" />} />
-          <Route path="/register" element={<AuthForms initialMode="register" />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/login_user" element={<AuthForms initialMode="login" />} />
+          <Route path="/register_user" element={<AuthForms initialMode="register" />} />
+          <Route path="/forgot_password" element={<ForgotPassword />} />
           <Route path="/reset-password/:token" element={<ResetPassword />} />
           
           <Route path="/" element={
@@ -83,13 +83,13 @@ const AppContent: React.FC = () => {
             </ProtectedRoute>
           } />
           
-          <Route path="/pdf/:id" element={
+          <Route path="/pdf_viewer/:id" element={
             <ProtectedRoute>
               <PdfViewer />
             </ProtectedRoute>
           } />
           
-          <Route path="/shared/:shareToken" element={<PdfViewer isShared />} />
+          <Route path="/shared_pdf_viewer/:shareToken" element={<PdfViewer isShared />} />
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

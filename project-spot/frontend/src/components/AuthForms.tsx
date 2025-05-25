@@ -146,7 +146,7 @@ const AuthForms: React.FC<AuthFormsProps> = ({ initialMode = 'login' }) => {
         
         {mode === 'login' && (
           <Box mt={1} textAlign="center">
-            <Button color="primary" href="/forgot-password" size="small">
+            <Button color="primary" href="/forgot_password" size="small">
               Forgot password?
             </Button>
           </Box>

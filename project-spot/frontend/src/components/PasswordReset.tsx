@@ -125,7 +125,7 @@ export const ForgotPassword: React.FC = () => {
         </Button>
         
         <Box mt={2} textAlign="center">
-          <Button color="primary" href="/login">
+          <Button color="primary" href="/login_user">
             Back to Login
           </Button>
         </Box>
@@ -225,7 +225,7 @@ export const ResetPassword: React.FC = () => {
         </Button>
         
         <Box mt={2} textAlign="center">
-          <Button color="primary" href="/login">
+          <Button color="primary" href="/login_user">
             Back to Login
           </Button>
         </Box>

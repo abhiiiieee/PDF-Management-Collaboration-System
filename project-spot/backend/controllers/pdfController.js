@@ -1,6 +1,20 @@
 const Pdf = require('../models/Pdf');
 const fs = require('fs');
 const path = require('path');
+const nodemailer = require('nodemailer');
+
+// Environment variables
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// Configure email transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || 'smtp.mailtrap.io',
+  port: process.env.EMAIL_PORT || 2525,
+  auth: {
+    user: process.env.EMAIL_USER || 'your-email-user',
+    pass: process.env.EMAIL_PASS || 'your-email-password'
+  }
+});
 
 // Upload a PDF file
 exports.uploadPdf = async (req, res) => {
@@ -29,11 +43,13 @@ exports.uploadPdf = async (req, res) => {
         id: pdf._id,
         filename: pdf.originalName,
         shareToken: pdf.shareToken,
-        createdAt: pdf.createdAt
+        createdAt: pdf.createdAt,
+        sharedWith: pdf.sharedWith || []
       }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Error uploading PDF:', error);
+    res.status(500).json({ message: 'Error uploading PDF' });
   }
 };
 
@@ -52,7 +68,8 @@ exports.getUserPdfs = async (req, res) => {
       }))
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Error fetching user PDFs:', error);
+    res.status(500).json({ message: 'Error fetching PDFs' });
   }
 };
 
@@ -65,30 +82,43 @@ exports.getPdfById = async (req, res) => {
     });
 
     if (!pdf) {
-      return res.status(404).json({ message: 'PDF not found or unauthorized' });
+      return res.status(404).json({ message: 'PDF not found' });
     }
 
-    res.json({ pdf });
+    res.json({
+      pdf: {
+        id: pdf._id,
+        filename: pdf.originalName,
+        createdAt: pdf.createdAt,
+        shareToken: pdf.shareToken,
+        sharedWith: pdf.sharedWith || []
+      }
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Error fetching PDF:', error);
+    res.status(500).json({ message: 'Error fetching PDF' });
   }
 };
 
 // Get a PDF by share token (for anyone with the token)
 exports.getPdfByShareToken = async (req, res) => {
   try {
-    // PDF is already available in req.pdf from middleware
-    const pdf = req.pdf;
+    const pdf = await Pdf.findOne({ shareToken: req.params.shareToken });
+    
+    if (!pdf) {
+      return res.status(404).json({ message: 'PDF not found' });
+    }
     
     res.json({
       pdf: {
         id: pdf._id,
         filename: pdf.originalName,
-        owner: pdf.owner
+        createdAt: pdf.createdAt
       }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Error fetching shared PDF:', error);
+    res.status(500).json({ message: 'Error fetching PDF' });
   }
 };
 
@@ -97,98 +127,118 @@ exports.servePdfFile = async (req, res) => {
   try {
     let pdf;
     
-    if (req.params.id) {
-      // Get by ID (must be owner)
-      pdf = await Pdf.findOne({
-        _id: req.params.id,
-        owner: req.user._id
-      });
-    } else if (req.pdf) {
-      // Get by share token (from middleware)
-      pdf = req.pdf;
+    if (req.params.shareToken) {
+      // Access via share token
+      pdf = await Pdf.findOne({ shareToken: req.params.shareToken });
+    } else {
+      // Access via ID (must be owner)
+      pdf = await Pdf.findOne({ _id: req.params.id, owner: req.user._id });
     }
 
     if (!pdf) {
-      return res.status(404).json({ message: 'PDF not found or unauthorized' });
+      return res.status(404).json({ message: 'PDF not found' });
     }
 
-    // Check if file exists
-    if (!fs.existsSync(pdf.path)) {
-      return res.status(404).json({ message: 'PDF file not found on server' });
+    const filePath = path.resolve(pdf.path);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: 'File not found on server' });
     }
-
-    // Send file
-    res.sendFile(path.resolve(pdf.path));
+    
+    res.contentType('application/pdf');
+    fs.createReadStream(filePath).pipe(res);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Error serving PDF file:', error);
+    res.status(500).json({ message: 'Error serving PDF file' });
   }
 };
 
 // Share a PDF with another user by email
 exports.sharePdf = async (req, res) => {
   try {
-    const { id } = req.params;
     const { email, accessType = 'view' } = req.body;
-
-    // Find PDF
-    const pdf = await Pdf.findOne({
-      _id: id,
-      owner: req.user._id
-    });
-
-    if (!pdf) {
-      return res.status(404).json({ message: 'PDF not found or unauthorized' });
+    
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
     }
-
+    
+    const pdf = await Pdf.findOne({ _id: req.params.id, owner: req.user._id });
+    
+    if (!pdf) {
+      return res.status(404).json({ message: 'PDF not found' });
+    }
+    
+    // Generate a share token if one doesn't exist
+    if (!pdf.shareToken) {
+      pdf.generateShareToken();
+    }
+    
     // Check if already shared with this email
     const alreadyShared = pdf.sharedWith.find(share => share.email === email);
-    if (alreadyShared) {
-      // Update access type if different
-      if (alreadyShared.accessType !== accessType) {
-        alreadyShared.accessType = accessType;
-        await pdf.save();
-      }
-    } else {
-      // Add new share
+    
+    if (!alreadyShared) {
       pdf.sharedWith.push({ email, accessType });
-      await pdf.save();
+    } else {
+      // Update access type if already shared
+      alreadyShared.accessType = accessType;
     }
-
+    
+    await pdf.save();
+    
+    // Create share link
+    const shareLink = `${FRONTEND_URL}/shared/${pdf.shareToken}`;
+    
+    // Send email notification
+    try {
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || 'noreply@pdfapp.com',
+        to: email,
+        subject: 'PDF Shared With You',
+        html: `
+          <h1>A PDF has been shared with you</h1>
+          <p>${req.user.name} has shared a PDF titled "${pdf.originalName}" with you.</p>
+          <p>Click the link below to view the document:</p>
+          <a href="${shareLink}">View PDF</a>
+          <p>This link gives you ${accessType} access to the document.</p>
+        `
+      });
+    } catch (emailError) {
+      console.error('Error sending share notification email:', emailError);
+      // Continue with the response even if email fails
+    }
+    
     res.json({
       message: 'PDF shared successfully',
       shareToken: pdf.shareToken,
-      shareLink: `${process.env.FRONTEND_URL}/shared/${pdf.shareToken}`
+      shareLink
     });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Error sharing PDF:', error);
+    res.status(500).json({ message: 'Error sharing PDF' });
   }
 };
 
 // Delete a PDF
 exports.deletePdf = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    // Find PDF
-    const pdf = await Pdf.findOne({
-      _id: id,
-      owner: req.user._id
-    });
-
+    const pdf = await Pdf.findOne({ _id: req.params.id, owner: req.user._id });
+    
     if (!pdf) {
-      return res.status(404).json({ message: 'PDF not found or unauthorized' });
+      return res.status(404).json({ message: 'PDF not found' });
     }
-
-    // Delete file from filesystem
-    if (fs.existsSync(pdf.path)) {
-      fs.unlinkSync(pdf.path);
+    
+    // Delete the file from the filesystem
+    const filePath = path.resolve(pdf.path);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
     }
-
-    // Delete from database
-    await Pdf.deleteOne({ _id: id });
-
+    
+    // Delete the database entry
+    await Pdf.deleteOne({ _id: pdf._id });
+    
     res.json({ message: 'PDF deleted successfully' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('Error deleting PDF:', error);
+    res.status(500).json({ message: 'Error deleting PDF' });
   }
 }; 

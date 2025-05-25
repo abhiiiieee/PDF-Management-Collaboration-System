@@ -12,4 +12,8 @@ router.post('/login', authController.login);
 // Get current user profile (protected route)
 router.get('/me', authenticate, authController.getCurrentUser);
 
+// Password reset routes
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/reset-password', authController.resetPassword);
+
 module.exports = router; 

@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+// JWT secret from environment or fallback
+const JWT_SECRET = process.env.JWT_SECRET || 'your-default-jwt-secret';
+
 // Middleware to protect routes that require authentication
 exports.authenticate = async (req, res, next) => {
   try {
@@ -12,10 +15,10 @@ exports.authenticate = async (req, res, next) => {
     }
 
     // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
     
     // Find user by id
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(decoded.id);
     
     if (!user) {
       return res.status(401).json({ message: 'Invalid token' });

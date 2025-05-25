@@ -67,7 +67,7 @@ const Dashboard: React.FC = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
-    if (!files || files.length === 0) return;
+    if (!files || files?.length === 0) return;
 
     const file = files[0];
     if (file.type !== 'application/pdf') {
@@ -178,7 +178,7 @@ const Dashboard: React.FC = () => {
     setNotification(prev => ({ ...prev, open: false }));
   };
 
-  const filteredPdfs = pdfs.filter(pdf => 
+  const filteredPdfs = pdfs?.filter(pdf => 
     pdf.filename.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -241,7 +241,7 @@ const Dashboard: React.FC = () => {
         <Box display="flex" justifyContent="center" my={4}>
           <CircularProgress />
         </Box>
-      ) : filteredPdfs.length === 0 ? (
+      ) : filteredPdfs?.length === 0 ? (
         searchTerm ? (
           <Typography variant="body1">No PDFs match your search. Try a different search term.</Typography>
         ) : (
@@ -249,7 +249,7 @@ const Dashboard: React.FC = () => {
         )
       ) : (
         <Grid container spacing={3}>
-          {filteredPdfs.map((pdf) => (
+          {filteredPdfs?.map((pdf) => (
             // @ts-ignore -- Grid component type issues with MUI v5
             <Grid item xs={12} sm={6} md={4} key={pdf.id}>
               <Card>
@@ -260,7 +260,7 @@ const Dashboard: React.FC = () => {
                   <Typography variant="body2" color="text.secondary">
                     Uploaded: {new Date(pdf.createdAt).toLocaleDateString()}
                   </Typography>
-                  {pdf.sharedWith.length > 0 && (
+                  {pdf.sharedWith?.length > 0 && (
                     <Typography variant="body2" color="text.secondary">
                       Shared with: {pdf.sharedWith.length} {pdf.sharedWith.length === 1 ? 'person' : 'people'}
                     </Typography>

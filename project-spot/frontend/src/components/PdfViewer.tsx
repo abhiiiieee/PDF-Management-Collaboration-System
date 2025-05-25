@@ -362,10 +362,10 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
   };
 
   // Filter comments by current page
-  const filteredComments = comments.filter(comment => comment.pageNumber === pageNumber);
+  const filteredComments = comments?.filter(comment => comment.pageNumber === pageNumber);
 
   const renderCommentList = () => {
-    if (filteredComments.length === 0) {
+    if (filteredComments?.length === 0) {
       return (
         <Box py={2} textAlign="center">
           <Typography color="textSecondary">No comments yet</Typography>
@@ -427,7 +427,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
                 </Box>
                 
                 {/* Render replies */}
-                {comment.replies && comment.replies.length > 0 && (
+                {comment.replies && comment.replies?.length > 0 && (
                   <Box ml={4} mt={1} pl={1} sx={{ borderLeft: '2px solid #eee' }}>
                     <List disablePadding>
                       {comment.replies.map(reply => (

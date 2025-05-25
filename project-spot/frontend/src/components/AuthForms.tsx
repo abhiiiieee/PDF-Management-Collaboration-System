@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Button, TextField, Typography, Paper, Alert } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 interface AuthFormsProps {
   initialMode?: 'login' | 'register';
+}
+
+interface LocationState {
+  resetSuccess?: boolean;
 }
 
 const AuthForms: React.FC<AuthFormsProps> = ({ initialMode = 'login' }) => {
@@ -14,9 +18,19 @@ const AuthForms: React.FC<AuthFormsProps> = ({ initialMode = 'login' }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [resetSuccess, setResetSuccess] = useState(false);
   
   const { login, register, error: authError, isLoading, user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Check for reset success message
+  useEffect(() => {
+    const state = location.state as LocationState;
+    if (state?.resetSuccess) {
+      setResetSuccess(true);
+    }
+  }, [location]);
   
   // Redirect if user is already authenticated
   useEffect(() => {
@@ -62,6 +76,12 @@ const AuthForms: React.FC<AuthFormsProps> = ({ initialMode = 'login' }) => {
         <Typography variant="h5" component="h1" align="center" gutterBottom>
           {mode === 'login' ? 'Login' : 'Register'}
         </Typography>
+        
+        {resetSuccess && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            Password reset successful! You can now login with your new password.
+          </Alert>
+        )}
         
         {(localError || authError) && (
           <Alert severity="error" sx={{ mb: 2 }}>
@@ -123,6 +143,14 @@ const AuthForms: React.FC<AuthFormsProps> = ({ initialMode = 'login' }) => {
         >
           {isLoading ? 'Processing...' : mode === 'login' ? 'Login' : 'Register'}
         </Button>
+        
+        {mode === 'login' && (
+          <Box mt={1} textAlign="center">
+            <Button color="primary" href="/forgot-password" size="small">
+              Forgot password?
+            </Button>
+          </Box>
+        )}
         
         <Box mt={2} textAlign="center">
           <Typography variant="body2">

@@ -29,13 +29,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const loadUser = async () => {
       if (token) {
         try {
-          const { user } = await authService.getCurrentUser();
-          setUser(user);
+          console.log('Attempting to load user with token');
+          const userData = await authService.getCurrentUser();
+          if (userData && userData.user) {
+            setUser(userData.user);
+            console.log('User loaded successfully');
+          } else {
+            console.error('Failed to load user: No user data returned');
+            localStorage.removeItem('token');
+            setToken(null);
+          }
         } catch (error) {
           console.error('Failed to load user:', error);
           localStorage.removeItem('token');
           setToken(null);
         }
+      } else {
+        console.log('No token found in localStorage');
       }
       setIsLoading(false);
     };

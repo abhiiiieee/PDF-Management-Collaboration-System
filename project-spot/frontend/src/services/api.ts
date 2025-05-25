@@ -26,20 +26,35 @@ api.interceptors.request.use(
 
 // Auth Service
 export const authService = {
-  register: async (name: string, email: string, password: string) => {
+  register: async (name: string, email: string, password: string): Promise<{ message: string; user: any; token: string }> => {
     const response = await api.post('/auth/register', { name, email, password });
     return response.data;
   },
   
-  login: async (email: string, password: string) => {
+  login: async (email: string, password: string): Promise<{ message: string; user: any; token: string }> => {
     const response = await api.post('/auth/login', { email, password });
     return response.data;
   },
   
-  getCurrentUser: async () => {
-    const response = await api.get('/auth/me');
+  getCurrentUser: async (): Promise<{ user: { id: string; name: string; email: string } } | null> => {
+    try {
+      const response = await api.get('/auth/me');
+      return response.data;
+    } catch (error) {
+      console.error('Error getting current user:', error);
+      return null;
+    }
+  },
+  
+  forgotPassword: async (email: string): Promise<{ message: string; resetUrl?: string; resetToken?: string }> => {
+    const response = await api.post('/auth/forgot-password', { email });
     return response.data;
   },
+  
+  resetPassword: async (token: string, password: string) => {
+    const response = await api.post('/auth/reset-password', { token, password });
+    return response.data;
+  }
 };
 
 // PDF Service
@@ -48,9 +63,11 @@ export const pdfService = {
     const formData = new FormData();
     formData.append('file', file);
     
+    const token = localStorage.getItem('token');
     const response = await api.post('/pdfs/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
       },
     });
     return response.data;
@@ -92,32 +109,32 @@ export const pdfService = {
 
 // Comment Service
 export const commentService = {
-  getPdfComments: async (pdfId: string) => {
+  getPdfComments: async (pdfId: string): Promise<{ comments: any[] }> => {
     const response = await api.get(`/comments/pdf/${pdfId}/comments`);
     return response.data;
   },
   
-  getSharedPdfComments: async (shareToken: string) => {
+  getSharedPdfComments: async (shareToken: string): Promise<{ comments: any[] }> => {
     const response = await api.get(`/comments/shared/${shareToken}/comments`);
     return response.data;
   },
   
-  addComment: async (pdfId: string, comment: any) => {
+  addComment: async (pdfId: string, comment: any): Promise<{ comment: any }> => {
     const response = await api.post(`/comments/pdf/${pdfId}/comment`, comment);
     return response.data;
   },
   
-  addCommentToShared: async (shareToken: string, comment: any) => {
+  addCommentToShared: async (shareToken: string, comment: any): Promise<{ comment: any }> => {
     const response = await api.post(`/comments/shared/${shareToken}/comment`, comment);
     return response.data;
   },
   
-  deleteComment: async (commentId: string) => {
+  deleteComment: async (commentId: string): Promise<{ message: string }> => {
     const response = await api.delete(`/comments/comment/${commentId}`);
     return response.data;
   },
   
-  editComment: async (commentId: string, text: string) => {
+  editComment: async (commentId: string, text: string): Promise<{ comment: any }> => {
     const response = await api.put(`/comments/comment/${commentId}`, { text });
     return response.data;
   },

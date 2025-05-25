@@ -5,6 +5,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 import AuthForms from './components/AuthForms';
+import { ForgotPassword, ResetPassword } from './components/PasswordReset';
 import Dashboard from './components/Dashboard';
 import PdfViewer from './components/PdfViewer';
 
@@ -73,6 +74,8 @@ const AppContent: React.FC = () => {
         <Routes>
           <Route path="/login" element={<AuthForms initialMode="login" />} />
           <Route path="/register" element={<AuthForms initialMode="register" />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password/:token" element={<ResetPassword />} />
           
           <Route path="/" element={
             <ProtectedRoute>

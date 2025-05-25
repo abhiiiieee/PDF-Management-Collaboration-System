@@ -15,10 +15,11 @@ import {
   Tooltip,
   CircularProgress,
   Snackbar,
-  Alert
+  Alert,
+  InputAdornment
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
-import { Delete as DeleteIcon, Share as ShareIcon, Visibility as VisibilityIcon } from '@mui/icons-material';
+import { Delete as DeleteIcon, Share as ShareIcon, Visibility as VisibilityIcon, Search as SearchIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { pdfService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -33,6 +34,7 @@ interface PDF {
 
 const Dashboard: React.FC = () => {
   const [pdfs, setPdfs] = useState<PDF[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [currentPdfId, setCurrentPdfId] = useState<string | null>(null);
@@ -176,6 +178,10 @@ const Dashboard: React.FC = () => {
     setNotification(prev => ({ ...prev, open: false }));
   };
 
+  const filteredPdfs = pdfs.filter(pdf => 
+    pdf.filename.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   if (!user) {
     return <Typography>Please log in to view your dashboard</Typography>;
   }
@@ -185,6 +191,22 @@ const Dashboard: React.FC = () => {
       <Typography variant="h4" component="h1" gutterBottom>
         My PDF Dashboard
       </Typography>
+      
+      <TextField
+        fullWidth
+        variant="outlined"
+        placeholder="Search PDFs by filename"
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        sx={{ mb: 3 }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon />
+            </InputAdornment>
+          ),
+        }}
+      />
       
       <Box sx={{ mb: 4 }}>
         <input
@@ -219,11 +241,15 @@ const Dashboard: React.FC = () => {
         <Box display="flex" justifyContent="center" my={4}>
           <CircularProgress />
         </Box>
-      ) : pdfs.length === 0 ? (
-        <Typography variant="body1">You haven't uploaded any PDFs yet. Upload your first PDF to get started!</Typography>
+      ) : filteredPdfs.length === 0 ? (
+        searchTerm ? (
+          <Typography variant="body1">No PDFs match your search. Try a different search term.</Typography>
+        ) : (
+          <Typography variant="body1">You haven't uploaded any PDFs yet. Upload your first PDF to get started!</Typography>
+        )
       ) : (
         <Grid container spacing={3}>
-          {pdfs.map((pdf) => (
+          {filteredPdfs.map((pdf) => (
             // @ts-ignore -- Grid component type issues with MUI v5
             <Grid item xs={12} sm={6} md={4} key={pdf.id}>
               <Card>

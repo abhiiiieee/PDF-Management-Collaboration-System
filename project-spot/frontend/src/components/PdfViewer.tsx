@@ -18,12 +18,18 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  ListItemSecondaryAction,
+  Menu,
+  MenuItem,
+  Avatar
 } from '@mui/material';
-import { Send as SendIcon, Delete as DeleteIcon, Edit as EditIcon } from '@mui/icons-material';
+import { Send as SendIcon, Delete as DeleteIcon, Edit as EditIcon, Reply as ReplyIcon, MoreVert as MoreVertIcon, Close as CloseIcon } from '@mui/icons-material';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { useParams } from 'react-router-dom';
 import { pdfService, commentService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import FormattedComment from './FormattedComment';
+import RichTextEditor from './RichTextEditor';
 
 // Set the worker source for react-pdf
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
@@ -44,6 +50,8 @@ interface Comment {
     x: number;
     y: number;
   };
+  parentComment?: string;
+  replies?: Comment[];
 }
 
 interface PdfViewerProps {
@@ -71,6 +79,9 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
   const [editCommentText, setEditCommentText] = useState('');
   const [guestInfoDialogOpen, setGuestInfoDialogOpen] = useState(false);
   const [tempComment, setTempComment] = useState('');
+  const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
+  const [selectedComment, setSelectedComment] = useState<Comment | null>(null);
   
   const documentRef = useRef<HTMLDivElement>(null);
 
@@ -103,7 +114,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
   useEffect(() => {
     const fetchComments = async () => {
       try {
-        let response;
+        let response: { comments: Comment[] };
         if (isShared && shareToken) {
           response = await commentService.getSharedPdfComments(shareToken);
         } else if (id && user) {
@@ -112,7 +123,29 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
           return;
         }
         
-        setComments(response.comments);
+        // Organize comments and replies
+        const comments = response.comments;
+        const parentComments: Comment[] = [];
+        const replyMap: { [key: string]: Comment[] } = {};
+        
+        // Group replies by parent comment
+        comments.forEach((comment: Comment) => {
+          if (comment.parentComment) {
+            if (!replyMap[comment.parentComment]) {
+              replyMap[comment.parentComment] = [];
+            }
+            replyMap[comment.parentComment].push(comment);
+          } else {
+            parentComments.push(comment);
+          }
+        });
+        
+        // Attach replies to parent comments
+        parentComments.forEach(comment => {
+          comment.replies = replyMap[comment._id] || [];
+        });
+        
+        setComments(parentComments);
       } catch (error) {
         console.error('Error fetching comments:', error);
         showNotification('Failed to load comments', 'error');
@@ -134,22 +167,23 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
     }
   };
 
-  const handleCommentSubmit = async () => {
-    if (!newComment.trim()) return;
+  const handleCommentSubmit = async (text: string) => {
+    if (!text.trim()) return;
     
     try {
       const commentData = {
-        text: newComment,
+        text,
         pageNumber,
-        position: { x: 0, y: 0 } // Default position
+        position: { x: 0, y: 0 }, // Default position
+        parentComment: replyingTo ? replyingTo._id : undefined
       };
       
-      let response;
+      let response: { comment: Comment };
       
       if (isShared && shareToken) {
         // For shared PDFs - guests need to provide name and email
         if (!user && (!guestName || !guestEmail)) {
-          setTempComment(newComment);
+          setTempComment(text);
           setGuestInfoDialogOpen(true);
           return;
         }
@@ -166,7 +200,27 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
         return;
       }
       
-      setComments([...comments, response.comment]);
+      // Add new comment to the state based on whether it's a reply or not
+      if (replyingTo) {
+        setComments(prevComments => {
+          return prevComments.map(comment => {
+            if (comment._id === replyingTo._id) {
+              const replies = comment.replies || [];
+              return {
+                ...comment,
+                replies: [...replies, response.comment]
+              };
+            }
+            return comment;
+          });
+        });
+        setReplyingTo(null);
+      } else {
+        // It's a new top-level comment
+        const newComment = { ...response.comment, replies: [] };
+        setComments(prevComments => [...prevComments, newComment]);
+      }
+      
       setNewComment('');
       showNotification('Comment added successfully', 'success');
     } catch (error) {
@@ -175,10 +229,28 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
     }
   };
 
-  const handleDeleteComment = async (commentId: string) => {
+  const handleDeleteComment = async (commentId: string, parentId?: string) => {
     try {
       await commentService.deleteComment(commentId);
-      setComments(comments.filter(comment => comment._id !== commentId));
+      
+      if (parentId) {
+        // Delete a reply
+        setComments(prevComments => {
+          return prevComments.map(comment => {
+            if (comment._id === parentId) {
+              return {
+                ...comment,
+                replies: (comment.replies || []).filter(reply => reply._id !== commentId)
+              };
+            }
+            return comment;
+          });
+        });
+      } else {
+        // Delete a top-level comment
+        setComments(prevComments => prevComments.filter(comment => comment._id !== commentId));
+      }
+      
       showNotification('Comment deleted successfully', 'success');
     } catch (error) {
       console.error('Error deleting comment:', error);
@@ -197,11 +269,25 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
     try {
       await commentService.editComment(editCommentId, editCommentText);
       
-      // Update comments state
-      setComments(comments.map(comment => 
-        comment._id === editCommentId ? { ...comment, text: editCommentText } : comment
-      ));
+      // Update comments state with proper type annotations
+      const updateComment = (commentsList: Comment[]): Comment[] => {
+        return commentsList.map(comment => {
+          if (comment._id === editCommentId) {
+            return { ...comment, text: editCommentText };
+          }
+          
+          if (comment.replies) {
+            return {
+              ...comment,
+              replies: updateComment(comment.replies)
+            };
+          }
+          
+          return comment;
+        });
+      };
       
+      setComments(prev => updateComment(prev));
       setEditCommentId(null);
       setEditCommentText('');
       showNotification('Comment updated successfully', 'success');
@@ -214,6 +300,42 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
   const cancelEditComment = () => {
     setEditCommentId(null);
     setEditCommentText('');
+  };
+
+  const handleReplyToComment = (comment: Comment) => {
+    setReplyingTo(comment);
+    setNewComment(`@${comment.user?.name || comment.guestName || 'User'} `);
+    // Focus the comment input
+    document.getElementById('comment-input')?.focus();
+  };
+
+  const cancelReply = () => {
+    setReplyingTo(null);
+    setNewComment('');
+  };
+
+  const handleCommentMenuOpen = (event: React.MouseEvent<HTMLElement>, comment: Comment) => {
+    setMenuAnchorEl(event.currentTarget);
+    setSelectedComment(comment);
+  };
+
+  const handleCommentMenuClose = () => {
+    setMenuAnchorEl(null);
+    setSelectedComment(null);
+  };
+
+  const handleMenuAction = (action: string) => {
+    if (!selectedComment) return;
+    
+    if (action === 'edit') {
+      handleEditComment(selectedComment);
+    } else if (action === 'delete') {
+      handleDeleteComment(selectedComment._id);
+    } else if (action === 'reply') {
+      handleReplyToComment(selectedComment);
+    }
+    
+    handleCommentMenuClose();
   };
 
   const showNotification = (message: string, severity: 'success' | 'error') => {
@@ -229,107 +351,204 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
   };
 
   const submitGuestInfo = async () => {
-    if (!guestName || !guestEmail || !shareToken) {
-      showNotification('Name and email are required', 'error');
-      return;
-    }
+    if (!guestName || !guestEmail) return;
     
-    try {
-      const commentData = {
-        text: tempComment,
-        pageNumber,
-        position: { x: 0, y: 0 },
-        guestName,
-        guestEmail
-      };
-      
-      const response = await commentService.addCommentToShared(shareToken, commentData);
-      
-      setComments([...comments, response.comment]);
-      setNewComment('');
-      setTempComment('');
-      setGuestInfoDialogOpen(false);
-      showNotification('Comment added successfully', 'success');
-    } catch (error) {
-      console.error('Error adding comment:', error);
-      showNotification('Failed to add comment', 'error');
+    setGuestInfoDialogOpen(false);
+    
+    if (tempComment) {
+      setNewComment(tempComment);
+      handleCommentSubmit(tempComment);
     }
   };
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="500px">
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (error) {
-    return <Alert severity="error">{error}</Alert>;
-  }
-
+  // Filter comments by current page
   const filteredComments = comments.filter(comment => comment.pageNumber === pageNumber);
 
-  return (
-    <Box sx={{ display: 'flex', height: 'calc(100vh - 100px)' }}>
-      {/* Main PDF Display */}
-      <Box 
-        sx={{ 
-          flex: 1, 
-          overflow: 'auto', 
-          p: 2,
-          bgcolor: '#f5f5f5'
-        }}
-        ref={documentRef}
-      >
-        <Paper 
-          elevation={3} 
-          sx={{ 
-            p: 2, 
-            width: 'fit-content', 
-            mx: 'auto',
-            mb: 2
-          }}
-        >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-            <Button 
-              disabled={pageNumber <= 1} 
-              onClick={() => handlePageChange(pageNumber - 1)}
-            >
-              Previous
-            </Button>
-            <Typography>
-              Page {pageNumber} of {numPages || '?'}
-            </Typography>
-            <Button 
-              disabled={pageNumber >= (numPages || 1)} 
-              onClick={() => handlePageChange(pageNumber + 1)}
-            >
-              Next
-            </Button>
-          </Box>
-          
-          <Document
-            file={pdfUrl}
-            onLoadSuccess={onDocumentLoadSuccess}
-            loading={<CircularProgress />}
-            error={<Alert severity="error">Failed to load PDF file</Alert>}
-          >
-            <Page 
-              pageNumber={pageNumber} 
-              renderTextLayer={false}
-              renderAnnotationLayer={false}
-              width={600}
-            />
-          </Document>
-        </Paper>
-      </Box>
+  const renderCommentList = () => {
+    if (filteredComments.length === 0) {
+      return (
+        <Box py={2} textAlign="center">
+          <Typography color="textSecondary">No comments yet</Typography>
+        </Box>
+      );
+    }
 
-      {/* Comments Drawer */}
+    return (
+      <List>
+        {filteredComments.map(comment => (
+          <Box key={comment._id}>
+            <ListItem alignItems="flex-start">
+              <Box sx={{ width: '100%' }}>
+                <Box display="flex" alignItems="center" mb={1}>
+                  <Avatar sx={{ mr: 1, width: 32, height: 32, bgcolor: 'primary.main' }}>
+                    {(comment.user?.name || comment.guestName || 'U').charAt(0).toUpperCase()}
+                  </Avatar>
+                  <Typography variant="subtitle2">
+                    {comment.user?.name || comment.guestName || 'Anonymous'}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary" sx={{ ml: 1 }}>
+                    {new Date(comment.createdAt).toLocaleString()}
+                  </Typography>
+                  <IconButton 
+                    size="small" 
+                    sx={{ ml: 'auto' }}
+                    onClick={(e) => handleCommentMenuOpen(e, comment)}
+                  >
+                    <MoreVertIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              
+                {editCommentId === comment._id ? (
+                  <Box mb={1}>
+                    <RichTextEditor
+                      initialValue={editCommentText}
+                      onSubmit={(text) => {
+                        setEditCommentText(text);
+                        submitEditComment();
+                      }}
+                      submitButtonText="Save"
+                    />
+                    <Button onClick={cancelEditComment} size="small" sx={{ mt: 1 }}>
+                      Cancel
+                    </Button>
+                  </Box>
+                ) : (
+                  <FormattedComment text={comment.text} />
+                )}
+                
+                <Box display="flex" justifyContent="flex-end">
+                  <Button
+                    startIcon={<ReplyIcon />}
+                    size="small"
+                    onClick={() => handleReplyToComment(comment)}
+                  >
+                    Reply
+                  </Button>
+                </Box>
+                
+                {/* Render replies */}
+                {comment.replies && comment.replies.length > 0 && (
+                  <Box ml={4} mt={1} pl={1} sx={{ borderLeft: '2px solid #eee' }}>
+                    <List disablePadding>
+                      {comment.replies.map(reply => (
+                        <ListItem key={reply._id} alignItems="flex-start" sx={{ py: 1 }}>
+                          <Box sx={{ width: '100%' }}>
+                            <Box display="flex" alignItems="center" mb={0.5}>
+                              <Avatar sx={{ mr: 1, width: 24, height: 24, bgcolor: 'secondary.main' }}>
+                                {(reply.user?.name || reply.guestName || 'U').charAt(0).toUpperCase()}
+                              </Avatar>
+                              <Typography variant="subtitle2" fontSize="0.85rem">
+                                {reply.user?.name || reply.guestName || 'Anonymous'}
+                              </Typography>
+                              <Typography variant="caption" color="textSecondary" sx={{ ml: 1 }}>
+                                {new Date(reply.createdAt).toLocaleString()}
+                              </Typography>
+                              <IconButton 
+                                size="small" 
+                                sx={{ ml: 'auto' }}
+                                onClick={(e) => handleCommentMenuOpen(e, reply)}
+                              >
+                                <MoreVertIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                            
+                            {editCommentId === reply._id ? (
+                              <Box mb={1}>
+                                <RichTextEditor
+                                  initialValue={editCommentText}
+                                  onSubmit={(text) => {
+                                    setEditCommentText(text);
+                                    submitEditComment();
+                                  }}
+                                  submitButtonText="Save"
+                                />
+                                <Button onClick={cancelEditComment} size="small" sx={{ mt: 1 }}>
+                                  Cancel
+                                </Button>
+                              </Box>
+                            ) : (
+                              <FormattedComment text={reply.text} />
+                            )}
+                          </Box>
+                        </ListItem>
+                      ))}
+                    </List>
+                  </Box>
+                )}
+              </Box>
+            </ListItem>
+            <Divider />
+          </Box>
+        ))}
+      </List>
+    );
+  };
+
+  return (
+    <Box sx={{ display: 'flex', position: 'relative', height: 'calc(100vh - 160px)' }}>
+      {/* Main content area */}
+      <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
+        {loading ? (
+          <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+            <CircularProgress />
+          </Box>
+        ) : error ? (
+          <Alert severity="error">{error}</Alert>
+        ) : (
+          <Box>
+            <Typography variant="h5" gutterBottom>
+              {pdfData?.filename || 'PDF Viewer'}
+            </Typography>
+            
+            <Paper 
+              elevation={3} 
+              sx={{ 
+                mt: 2, 
+                p: 2, 
+                maxHeight: 'calc(100vh - 240px)', 
+                overflow: 'auto',
+                display: 'flex',
+                justifyContent: 'center'
+              }}
+              ref={documentRef}
+            >
+              {pdfUrl && (
+                <Document
+                  file={pdfUrl}
+                  onLoadSuccess={onDocumentLoadSuccess}
+                  loading={<CircularProgress />}
+                  error={<Alert severity="error">Failed to load PDF</Alert>}
+                >
+                  <Page pageNumber={pageNumber} />
+                </Document>
+              )}
+            </Paper>
+            
+            <Box display="flex" justifyContent="center" alignItems="center" my={2}>
+              <Button 
+                disabled={pageNumber <= 1} 
+                onClick={() => handlePageChange(pageNumber - 1)}
+              >
+                Previous
+              </Button>
+              <Typography mx={2}>
+                Page {pageNumber} of {numPages || '?'}
+              </Typography>
+              <Button 
+                disabled={pageNumber >= (numPages || 1)} 
+                onClick={() => handlePageChange(pageNumber + 1)}
+              >
+                Next
+              </Button>
+            </Box>
+          </Box>
+        )}
+      </Box>
+      
+      {/* Comments panel */}
       <Drawer
-        variant="persistent"
+        variant="permanent"
         anchor="right"
-        open={drawerOpen}
         sx={{
           width: drawerWidth,
           flexShrink: 0,
@@ -338,144 +557,97 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
             position: 'relative',
             height: '100%',
             border: 'none',
-            boxShadow: '-2px 0 5px rgba(0,0,0,0.1)'
+            borderLeft: '1px solid rgba(0, 0, 0, 0.12)'
           },
         }}
       >
-        <Box sx={{ p: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            Comments (Page {pageNumber})
+        <Box sx={{ p: 2, borderBottom: '1px solid rgba(0, 0, 0, 0.12)' }}>
+          <Typography variant="h6">Comments</Typography>
+          <Typography variant="caption" color="textSecondary">
+            Page {pageNumber}
           </Typography>
-          <Divider sx={{ mb: 2 }} />
-          
-          <Box sx={{ height: 'calc(100vh - 250px)', overflow: 'auto', mb: 2 }}>
-            {filteredComments.length === 0 ? (
-              <Typography color="text.secondary">
-                No comments on this page yet
-              </Typography>
-            ) : (
-              <List>
-                {filteredComments.map((comment) => (
-                  <ListItem 
-                    key={comment._id}
-                    alignItems="flex-start"
-                    sx={{ 
-                      bgcolor: '#f9f9f9', 
-                      mb: 1, 
-                      borderRadius: 1,
-                      flexDirection: 'column',
-                      alignItems: 'stretch'
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <Box>
-                        <Typography variant="subtitle2" fontWeight="bold">
-                          {comment.user ? comment.user.name : comment.guestName}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {new Date(comment.createdAt).toLocaleString()}
-                        </Typography>
-                      </Box>
-                      
-                      {(user && comment.user && user.id === comment.user._id) && (
-                        <Box>
-                          <IconButton 
-                            size="small" 
-                            onClick={() => handleEditComment(comment)}
-                            sx={{ p: 0.5 }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton 
-                            size="small" 
-                            onClick={() => handleDeleteComment(comment._id)}
-                            color="error"
-                            sx={{ p: 0.5 }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      )}
-                    </Box>
-                    
-                    {editCommentId === comment._id ? (
-                      <Box sx={{ mt: 1 }}>
-                        <TextField
-                          multiline
-                          fullWidth
-                          size="small"
-                          value={editCommentText}
-                          onChange={e => setEditCommentText(e.target.value)}
-                          sx={{ mb: 1 }}
-                        />
-                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                          <Button size="small" onClick={cancelEditComment}>
-                            Cancel
-                          </Button>
-                          <Button 
-                            size="small" 
-                            variant="contained" 
-                            onClick={submitEditComment}
-                          >
-                            Save
-                          </Button>
-                        </Box>
-                      </Box>
-                    ) : (
-                      <ListItemText 
-                        primary={comment.text}
-                        sx={{ whiteSpace: 'pre-wrap' }}
-                      />
-                    )}
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </Box>
-          
-          <Box>
-            <TextField
-              label="Add a comment"
-              multiline
-              rows={3}
-              fullWidth
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              sx={{ mb: 1 }}
-            />
-            <Button
-              variant="contained"
-              endIcon={<SendIcon />}
-              fullWidth
-              onClick={handleCommentSubmit}
-              disabled={!newComment.trim()}
+        </Box>
+        
+        <Box sx={{ overflow: 'auto', flexGrow: 1 }}>
+          {renderCommentList()}
+        </Box>
+        
+        <Box sx={{ p: 2, borderTop: '1px solid rgba(0, 0, 0, 0.12)' }}>
+          {replyingTo && (
+            <Box 
+              sx={{ 
+                mb: 1, 
+                p: 1, 
+                backgroundColor: 'action.hover', 
+                borderRadius: 1,
+                display: 'flex',
+                alignItems: 'center'
+              }}
             >
-              Comment
-            </Button>
-          </Box>
+              <Typography variant="caption" sx={{ flex: 1 }}>
+                Replying to {replyingTo.user?.name || replyingTo.guestName || 'User'}
+              </Typography>
+              <IconButton size="small" onClick={cancelReply}>
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Box>
+          )}
+          
+          <RichTextEditor
+            initialValue={newComment}
+            onSubmit={handleCommentSubmit}
+            submitButtonText={replyingTo ? 'Reply' : 'Comment'}
+            placeholder={replyingTo ? 'Write a reply...' : 'Add a comment...'}
+          />
         </Box>
       </Drawer>
+
+      {/* Comment menu */}
+      <Menu
+        anchorEl={menuAnchorEl}
+        open={Boolean(menuAnchorEl)}
+        onClose={handleCommentMenuClose}
+      >
+        <MenuItem onClick={() => handleMenuAction('reply')}>
+          <ReplyIcon fontSize="small" sx={{ mr: 1 }} />
+          Reply
+        </MenuItem>
+        {(user && selectedComment?.user?._id === user.id) && (
+          <>
+            <MenuItem onClick={() => handleMenuAction('edit')}>
+              <EditIcon fontSize="small" sx={{ mr: 1 }} />
+              Edit
+            </MenuItem>
+            <MenuItem onClick={() => handleMenuAction('delete')}>
+              <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
+              Delete
+            </MenuItem>
+          </>
+        )}
+      </Menu>
       
-      {/* Guest Information Dialog */}
+      {/* Guest info dialog */}
       <Dialog open={guestInfoDialogOpen} onClose={() => setGuestInfoDialogOpen(false)}>
         <DialogTitle>Your Information</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" gutterBottom>
-            Please provide your name and email to continue
+          <Typography variant="body2" paragraph>
+            Please provide your name and email to add a comment
           </Typography>
           <TextField
+            autoFocus
+            margin="dense"
             label="Your Name"
+            type="text"
             fullWidth
-            margin="normal"
             value={guestName}
             onChange={(e) => setGuestName(e.target.value)}
             required
           />
           <TextField
+            margin="dense"
             label="Your Email"
             type="email"
             fullWidth
-            margin="normal"
             value={guestEmail}
             onChange={(e) => setGuestEmail(e.target.value)}
             required
@@ -483,27 +655,18 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ isShared = false }) => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setGuestInfoDialogOpen(false)}>Cancel</Button>
-          <Button 
-            onClick={submitGuestInfo}
-            variant="contained"
-            disabled={!guestName || !guestEmail}
-          >
+          <Button onClick={submitGuestInfo} variant="contained" color="primary">
             Submit
           </Button>
         </DialogActions>
       </Dialog>
       
-      {/* Notification Snackbar */}
       <Snackbar 
         open={notification.open} 
         autoHideDuration={6000} 
         onClose={handleCloseNotification}
       >
-        <Alert 
-          onClose={handleCloseNotification} 
-          severity={notification.severity}
-          sx={{ width: '100%' }}
-        >
+        <Alert onClose={handleCloseNotification} severity={notification.severity}>
           {notification.message}
         </Alert>
       </Snackbar>
